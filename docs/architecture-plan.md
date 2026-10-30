@@ -356,6 +356,13 @@ saved as `fixtures/tableau/sales_performance_legacy.{twb,twbx}`. Until that copy
 results on the generated file are reported as "generated fixture only", because generator and
 parser come from the same author.
 
+**Release gate (2026-10-30):** workbooks are delivered as `.twbx` only, and each one must pass a
+static content-model check plus a live load in Tableau Desktop (release file and an all-sheets
+copy, with dialog text and the query log checked) before it is handed over
+(`scripts/build_demo_workbook.py`; details in `fixtures/tableau/FIXTURE.md`). The gate led to one
+model change: the lookups are physical left joins inside the order logical table, and returns are
+the only relationship, because generated chained relationships failed Tableau's query checker.
+
 ---
 
 ## 7. Data model mapping approach

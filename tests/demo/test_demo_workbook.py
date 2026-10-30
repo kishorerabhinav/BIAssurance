@@ -69,13 +69,16 @@ def test_every_formula_reference_resolves(root):
 def test_model_structure(root):
     ds = root.find("datasources/datasource[@caption]")
     graph = ds.find(FCP + "object-graph")
-    assert len(graph.findall("objects/object")) == 6
-    assert len(graph.findall("relationships/relationship")) == 5
+    assert [o.get("caption") for o in graph.findall("objects/object")] == ["ORDERS_HDR.csv", "RTN_LOG.csv"]
+    assert all("." not in o.get("id") for o in graph.findall("objects/object"))
     joins = graph.findall(".//relation[@type='join']")
-    assert len(joins) == 1 and joins[0].get("join") == "inner"
-    rtn = [r for r in graph.findall("relationships/relationship")
-           if "RTN_LOG" in r.find("second-end-point").get("object-id")][0]
+    assert sorted(j.get("join") for j in joins) == ["inner", "left", "left", "left", "left"]
+    tables = [r.get("name") for r in graph.find("objects/object").iter("relation") if r.get("type") == "table"]
+    assert tables == ["ORDERS_HDR.csv", "ord_lines.csv", "PROD_MSTR.csv", "prod_cat.csv", "CUSTMR.csv",
+                      "RGN_LKP.csv"]
+    (rtn,) = graph.findall("relationships/relationship")
     assert rtn.find("expression").get("op") == "AND"
+    assert len(rtn.findall("expression/expression")) == 2
     flt = ds.find("filter")
     assert flt.get("column") == "[OrdStat]"
     assert flt.find("groupfilter").get("function") == "except"

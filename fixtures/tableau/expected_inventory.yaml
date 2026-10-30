@@ -2,14 +2,15 @@
 # Names are as written in the guide; the build notes in FIXTURE.md record any deviations.
 workbook: sales_performance_legacy
 connection: {kind: text_file, folder_suffix: demo/data/seed_42/legacy_csv}
-physical_joins:
+logical_tables: [ORDERS_HDR.csv, RTN_LOG.csv]
+physical_joins:   # all inside the ORDERS_HDR logical table
   - {type: inner, left: ORDERS_HDR.csv, right: ord_lines.csv, on: [[OrdID, OrdID]]}
+  - {type: left, left: ord_lines.csv, right: PROD_MSTR.csv, on: [[ProdCode, ProdCode]]}
+  - {type: left, left: PROD_MSTR.csv, right: prod_cat.csv, on: [[CatCd, CatCd]]}
+  - {type: left, left: ORDERS_HDR.csv, right: CUSTMR.csv, on: [[CustNo, CustNo]]}
+  - {type: left, left: CUSTMR.csv, right: RGN_LKP.csv, on: [[Rgn_Cd, Rgn_Cd]]}
 relationships:
-  - {from: ORDERS_HDR/ord_lines, to: PROD_MSTR.csv, on: [[ProdCode, ProdCode]]}
-  - {from: PROD_MSTR.csv, to: prod_cat.csv, on: [[CatCd, CatCd]]}
-  - {from: ORDERS_HDR/ord_lines, to: CUSTMR.csv, on: [[CustNo, CustNo]]}
-  - {from: CUSTMR.csv, to: RGN_LKP.csv, on: [[Rgn_Cd, Rgn_Cd]]}
-  - {from: ORDERS_HDR/ord_lines, to: RTN_LOG.csv, on: [[OrdID, OrdID], [line_no, line_no]]}
+  - {from: ORDERS_HDR.csv, to: RTN_LOG.csv, on: [[OrdID, OrdID], [line_no, line_no]]}
 datasource_filters:
   - {field: OrdStat, kind: categorical, exclude: [X]}
 parameters:

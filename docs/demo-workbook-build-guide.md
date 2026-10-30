@@ -36,27 +36,35 @@ in the fixture notes (step 9). Differences are useful evidence.
 2. All CSVs in the folder appear under **Files** in the left pane.
 3. Keep the connection **Live** (not Extract).
 
-## 2. Build the data model: one physical join + relationships
+## 2. Build the data model: physical joins + one relationship
 
-The model deliberately uses **both** structures, because real legacy workbooks do.
+The model deliberately uses **both** structures, because real legacy workbooks do: lookups are
+joined physically into the order logical table, and returns stay a separate logical table at their
+own grain, connected by a relationship.
 
-**2a. Physical join (inside one logical table)**
+(Revised 2026-10-30. An earlier version related products → categories and customers → regions
+as chained relationships; workbooks generated with that layout failed Tableau 2026.3's query
+checker, so the generated workbook and this guide use the layout below, which loads cleanly.)
+
+**2a. Physical joins (inside the order logical table)**
 1. `ORDERS_HDR.csv` is on the canvas as a logical table. **Double-click it** to open its physical layer.
-2. Drag `ord_lines.csv` into that physical canvas, next to `ORDERS_HDR.csv`.
-3. In the join dialog: **Inner** join, `OrdID` (ORDERS_HDR.csv) = `OrdID` (ord_lines.csv).
-4. Close the physical layer to return to the logical canvas.
+2. Drag in each file and set the join, in this order:
 
-**2b. Relationships (logical layer)** — drag each file onto the logical canvas and set the related fields:
-
-| Drag in | Relate to | Fields |
+| Drag in | Join type | Join clause |
 |---|---|---|
-| `PROD_MSTR.csv` | the ORDERS_HDR/ord_lines logical table | `ProdCode` (from ord_lines) = `ProdCode` |
-| `prod_cat.csv` | `PROD_MSTR.csv` | `CatCd` = `CatCd` |
-| `CUSTMR.csv` | the ORDERS_HDR/ord_lines logical table | `CustNo` (from ORDERS_HDR) = `CustNo` |
-| `RGN_LKP.csv` | `CUSTMR.csv` | `Rgn_Cd` = `Rgn_Cd` |
-| `RTN_LOG.csv` | the ORDERS_HDR/ord_lines logical table | **two** pairs: `OrdID` = `OrdID` **and** `line_no` = `line_no` (use "Add more fields" in the relationship dialog) |
+| `ord_lines.csv` | **Inner** | `OrdID` (ORDERS_HDR.csv) = `OrdID` (ord_lines.csv) |
+| `PROD_MSTR.csv` | **Left** | `ProdCode` (ord_lines.csv) = `ProdCode` (PROD_MSTR.csv) |
+| `prod_cat.csv` | **Left** | `CatCd` (PROD_MSTR.csv) = `CatCd` (prod_cat.csv) |
+| `CUSTMR.csv` | **Left** | `CustNo` (ORDERS_HDR.csv) = `CustNo` (CUSTMR.csv) |
+| `RGN_LKP.csv` | **Left** | `Rgn_Cd` (CUSTMR.csv) = `Rgn_Cd` (RGN_LKP.csv) |
 
-Leave relationship performance options at their defaults.
+3. Close the physical layer to return to the logical canvas.
+
+The left joins keep customers without a region (they appear as **Null** region), exactly as before.
+
+**2b. Relationship (logical layer)** — drag `RTN_LOG.csv` onto the logical canvas next to the
+order table and relate it on **two** field pairs: `OrdID` = `OrdID` **and** `line_no` = `line_no`
+(use "Add more fields" in the relationship dialog). Leave performance options at their defaults.
 
 **2c. Check data types** in the data grid (the icon above each column):
 

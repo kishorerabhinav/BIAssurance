@@ -33,6 +33,33 @@ TABLES = ["ORDERS_HDR", "ord_lines", "PROD_MSTR", "prod_cat", "CUSTMR", "RGN_LKP
 DATE_FIELDS = {"OrdDt", "ShipDt", "RtnDt", "SignupDt"}
 INT_FIELDS = {"QTY", "line_no", "RtnQty"}
 REAL_FIELDS = {"UnitPx", "DiscPct", "UnitCost", "LineAmt", "OrdTotAmt", "ListPx", "StdCost", "RtnAmt"}
+# Logical tables. A tree is a CSV name, or (join type, left tree, right CSV, (left key, right key)).
+# The order logical table holds the physical joins (inner to lines, left to the lookups); returns
+# stay a separate logical table at their own grain, related on the composite line key.
+#
+# Tableau 2026.3 load checks on 2026-10-30 rejected two other layouts this generator produced:
+# chained relationships (orders -> products -> categories) and physical joins inside non-root
+# logical tables both failed with "Logical Query missing field ... from relationOp". Only direct
+# relationships from the root table and joins inside the root table loaded, hence this design.
+ORDER_TREE = (
+    "left",
+    ("left",
+     ("left",
+      ("left",
+       ("inner", "ORDERS_HDR", "ord_lines", ("OrdID", "OrdID")),
+       "PROD_MSTR", ("ProdCode", "ProdCode")),
+      "prod_cat", ("CatCd", "CatCd")),
+     "CUSTMR", ("CustNo", "CustNo")),
+    "RGN_LKP", ("Rgn_Cd", "Rgn_Cd"),
+)
+OBJECTS = [("ORDERS_HDR", ORDER_TREE), ("RTN_LOG", "RTN_LOG")]
+# Which table supplies each join key: the left key may come from any table already in the tree.
+KEY_OWNER = {"OrdID": "ORDERS_HDR", "ProdCode": "ord_lines", "CatCd": "PROD_MSTR", "CustNo": "ORDERS_HDR",
+             "Rgn_Cd": "CUSTMR"}
+OBJECT_OF = {t: "ORDERS_HDR" for t in TABLES if t != "RTN_LOG"} | {"RTN_LOG": "RTN_LOG"}
+RELATIONSHIPS = [
+    ("ORDERS_HDR", "RTN_LOG", [("OrdID", "OrdID (RTN_LOG.csv)"), ("line_no", "line_no (RTN_LOG.csv)")]),
+]
 REMOTE_TYPE = {"string": "129", "integer": "20", "real": "5", "date": "133"}
 DEFAULT_AGG = {"string": "Count", "integer": "Sum", "real": "Sum", "date": "Year"}
 
@@ -170,8 +197,16 @@ def sub(parent, tag, attrib=None, text=None, **kw):
     return el
 
 
+ALL_SHEETS = ["KPI Summary", "Revenue by Region", "Monthly Trend", "Category Profitability",
+              "Top Products", "Customer Cohorts"]
+GATE_DASHBOARD = "Load check - all sheets"
+
+
 class Workbook:
-    def __init__(self, csv_dir_for_connection: str, headers: dict[str, list[str]]):
+    def __init__(self, csv_dir_for_connection: str, headers: dict[str, list[str]], gate: bool = False):
+        # gate=True adds a dashboard showing every sheet and opens on it, so a load check in
+        # Tableau runs every sheet's queries. Never used for the released file.
+        self.gate = gate
         self.ds_name = "federated." + _short_id("datasource")
         self.conn_name = "textscan." + _short_id("connection")
         self.directory = csv_dir_for_connection
@@ -195,19 +230,24 @@ class Workbook:
             sub(cols, "column", {"datatype": f.datatype, "name": f.remote, "ordinal": f.ordinal})
         return rel
 
-    def _join_relation(self, parent):
-        join = sub(parent, "relation", {"join": "inner", "type": "join"})
+    def _object_relation(self, parent, tag: str, tree):
+        """A logical table: a single CSV, or a (nested) physical join tree of CSVs."""
+        if isinstance(tree, str):
+            return self._table_relation(parent, tag, tree)
+        kind, left, right, (lkey, rkey) = tree
+        join = sub(parent, tag, {"join": kind, "type": "join"})
         clause = sub(join, "clause", {"type": "join"})
         expr = sub(clause, "expression", {"op": "="})
-        sub(expr, "expression", {"op": "[ORDERS_HDR.csv].[OrdID]"})
-        sub(expr, "expression", {"op": "[ord_lines.csv].[OrdID]"})
-        self._table_relation(join, "relation", "ORDERS_HDR")
-        self._table_relation(join, "relation", "ord_lines")
+        sub(expr, "expression", {"op": f"[{KEY_OWNER[lkey]}.csv].[{lkey}]"})
+        sub(expr, "expression", {"op": f"[{right}.csv].[{rkey}]"})
+        self._object_relation(join, "relation", left)
+        self._table_relation(join, "relation", right)
         return join
 
     def _object_id(self, table: str) -> str:
-        # The joined logical table is named after its first physical table.
-        return f"{table}.csv_{_hex_id(table)}"
+        # A logical table is named after its first physical table. Tableau-authored ids have the
+        # form <Name>_<32 hex>; an id containing "." broke relationship resolution in Tableau.
+        return f"{table}_{_hex_id(table)}"
 
     def build_datasource(self, datasources):
         ds = sub(datasources, "datasource", {"caption": "ORDERS_HDR+ (legacy_csv)", "inline": "true",
@@ -218,12 +258,11 @@ class Workbook:
         sub(named, "connection", {"class": "textscan", "directory": self.directory,
                                   "filename": "ORDERS_HDR.csv", "password": "", "server": ""})
 
-        # Legacy (pre-relationships) readers see only the joined first object.
-        self._join_relation_into(conn, FCP_FALSE + "relation")
+        # Legacy (pre-relationships) readers see only the first logical table.
+        self._object_relation(conn, FCP_FALSE + "relation", OBJECTS[0][1])
         coll = sub(conn, FCP_TRUE + "relation", {"type": "collection"})
-        self._join_relation(coll)
-        for t in TABLES[2:]:
-            self._table_relation(coll, "relation", t)
+        for _, tree in OBJECTS:
+            self._object_relation(coll, "relation", tree)
 
         cols = sub(conn, "cols")
         for f in self.fields:
@@ -241,8 +280,7 @@ class Workbook:
             sub(r, "local-type", text=f.datatype)
             sub(r, "aggregation", text=DEFAULT_AGG[f.datatype])
             sub(r, "contains-null", text="true")
-            owner = "ORDERS_HDR" if f.table in ("ORDERS_HDR", "ord_lines") else f.table
-            sub(r, FCP_TRUE + "object-id", text=f"[{self._object_id(owner)}]")
+            sub(r, FCP_TRUE + "object-id", text=f"[{self._object_id(OBJECT_OF[f.table])}]")
 
         sub(ds, "aliases", {"enabled": "yes"})
         for f in self.fields:
@@ -252,6 +290,12 @@ class Workbook:
         for c in CALCS:
             self._calc_column(ds, c)
 
+        # Child order follows Tableau's datasource content model (see validate.py).
+        sub(ds, "layout", {"dim-ordering": "alphabetic", "measure-ordering": "alphabetic",
+                           "show-structure": "true"})
+        sem = sub(ds, "semantic-values")
+        sub(sem, "semantic-value", {"key": "[Country].[Name]", "value": '"India"'})
+
         # Data source filter: exclude cancelled orders.
         flt = sub(ds, "filter", {"class": "categorical", "column": "[OrdStat]", "filter-group": "2"})
         gf = sub(flt, "groupfilter", {"function": "except", U + "ui-domain": "database",
@@ -259,26 +303,13 @@ class Workbook:
         sub(gf, "groupfilter", {"function": "level-members", "level": "[OrdStat]"})
         sub(gf, "groupfilter", {"function": "member", "level": "[OrdStat]", "member": '"X"'})
 
-        sub(ds, "layout", {"dim-ordering": "alphabetic", "measure-ordering": "alphabetic",
-                           "show-structure": "true"})
-        sem = sub(ds, "semantic-values")
-        sub(sem, "semantic-value", {"key": "[Country].[Name]", "value": '"India"'})
-
         graph = sub(ds, FCP_TRUE + "object-graph")
         objects = sub(graph, "objects")
-        joined = sub(objects, "object", {"caption": "ORDERS_HDR.csv", "id": self._object_id("ORDERS_HDR")})
-        self._join_relation(sub(joined, "properties", {"context": ""}))
-        for t in TABLES[2:]:
-            obj = sub(objects, "object", {"caption": f"{t}.csv", "id": self._object_id(t)})
-            self._table_relation(sub(obj, "properties", {"context": ""}), "relation", t)
+        for name, tree in OBJECTS:
+            node = sub(objects, "object", {"caption": f"{name}.csv", "id": self._object_id(name)})
+            self._object_relation(sub(node, "properties", {"context": ""}), "relation", tree)
         rels = sub(graph, "relationships")
-        for first, second, pairs in [
-            ("ORDERS_HDR", "PROD_MSTR", [("ProdCode", "ProdCode (PROD_MSTR.csv)")]),
-            ("PROD_MSTR", "prod_cat", [("CatCd", "CatCd (prod_cat.csv)")]),
-            ("ORDERS_HDR", "CUSTMR", [("CustNo", "CustNo (CUSTMR.csv)")]),
-            ("CUSTMR", "RGN_LKP", [("Rgn_Cd", "Rgn_Cd (RGN_LKP.csv)")]),
-            ("ORDERS_HDR", "RTN_LOG", [("OrdID", "OrdID (RTN_LOG.csv)"), ("line_no", "line_no (RTN_LOG.csv)")]),
-        ]:
+        for first, second, pairs in RELATIONSHIPS:
             rel = sub(rels, "relationship")
             if len(pairs) == 1:
                 eq = sub(rel, "expression", {"op": "="})
@@ -293,15 +324,6 @@ class Workbook:
             sub(rel, "first-end-point", {"object-id": self._object_id(first)})
             sub(rel, "second-end-point", {"object-id": self._object_id(second)})
         return ds
-
-    def _join_relation_into(self, parent, tag):
-        join = sub(parent, tag, {"join": "inner", "type": "join"})
-        clause = sub(join, "clause", {"type": "join"})
-        expr = sub(clause, "expression", {"op": "="})
-        sub(expr, "expression", {"op": "[ORDERS_HDR.csv].[OrdID]"})
-        sub(expr, "expression", {"op": "[ord_lines.csv].[OrdID]"})
-        self._table_relation(join, "relation", "ORDERS_HDR")
-        self._table_relation(join, "relation", "ord_lines")
 
     def _calc_column(self, parent, c: Calc):
         attrs = {"caption": c.caption, "datatype": c.datatype, "name": f"[{c.internal}]",
@@ -486,15 +508,47 @@ class Workbook:
         for i, (name, x, y, w, h) in enumerate(layout, start=2):
             sub(outer, "zone", {"h": h, "id": i, "name": name, "w": w, "x": x, "y": y})
         sub(db, "simple-id", {"uuid": _guid("db:Sales Performance")})
+        if self.gate:
+            g = sub(dbs, "dashboard", {"name": GATE_DASHBOARD})
+            sub(g, "style")
+            sub(g, "size", {"maxheight": "1200", "maxwidth": "1600", "minheight": "1200", "minwidth": "1600"})
+            outer = sub(sub(g, "zones"), "zone", {"h": "100000", "id": "1", "type-v2": "layout-basic",
+                                                  "w": "100000", "x": "0", "y": "0"})
+            for i, name in enumerate(ALL_SHEETS):
+                sub(outer, "zone", {"h": "50000", "id": i + 2, "name": name, "w": "33333",
+                                    "x": (i % 3) * 33333, "y": (i // 3) * 50000})
+            sub(g, "simple-id", {"uuid": _guid("db:" + GATE_DASHBOARD)})
+
+    DASHBOARD_SHEETS = ["KPI Summary", "Revenue by Region", "Monthly Trend", "Category Profitability"]
 
     def build_windows(self, root):
+        # Content model: worksheet windows (cards, viewpoint?, simple-id);
+        # dashboard windows (viewpoints, active, simple-id).
         wins = sub(root, "windows", {"source-height": "30"})
         for name in ["KPI Summary", "Revenue by Region", "Monthly Trend", "Category Profitability",
                      "Top Products", "Customer Cohorts"]:
             w = sub(wins, "window", {"class": "worksheet", "name": name})
+            cards = sub(w, "cards")
+            left = sub(sub(cards, "edge", {"name": "left"}), "strip", {"size": "160"})
+            for card in ("pages", "filters", "marks"):
+                sub(left, "card", {"type": card})
+            top = sub(cards, "edge", {"name": "top"})
+            for size, card in (("2147483647", "columns"), ("2147483647", "rows"), ("31", "title")):
+                sub(sub(top, "strip", {"size": size}), "card", {"type": card})
             sub(w, "simple-id", {"uuid": _guid("win:" + name)})
-        w = sub(wins, "window", {"class": "dashboard", "maximized": "true", "name": "Sales Performance"})
-        sub(w, "simple-id", {"uuid": _guid("win:Sales Performance")})
+        dashboards = [("Sales Performance", self.DASHBOARD_SHEETS)]
+        if self.gate:
+            dashboards.append((GATE_DASHBOARD, ALL_SHEETS))
+        for i, (db_name, sheets) in enumerate(dashboards):
+            attrs = {"class": "dashboard", "name": db_name}
+            if i == len(dashboards) - 1:
+                attrs["maximized"] = "true"   # the window Tableau opens on
+            w = sub(wins, "window", attrs)
+            vps = sub(w, "viewpoints")
+            for name in sheets:
+                sub(sub(vps, "viewpoint", {"name": name}), "zoom", {"type": "entire-view"})
+            sub(w, "active", {"id": "-1"})
+            sub(w, "simple-id", {"uuid": _guid("win:" + db_name)})
 
     def build(self) -> etree._Element:
         root = etree.Element("workbook", nsmap={"user": USER_NS})
@@ -532,9 +586,9 @@ def write_twb(csv_dir: Path, out_path: Path, connection_directory: str | None = 
     return out_path
 
 
-def write_twbx(csv_dir: Path, out_path: Path) -> Path:
+def write_twbx(csv_dir: Path, out_path: Path, gate: bool = False) -> Path:
     """Packaged workbook: the .twb points at Data/legacy_csv inside the archive, CSVs included."""
-    wb = Workbook("Data/legacy_csv", read_headers(csv_dir))
+    wb = Workbook("Data/legacy_csv", read_headers(csv_dir), gate=gate)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fixed_time = (2026, 10, 30, 0, 0, 0)  # constant timestamps keep the archive reproducible
     with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
