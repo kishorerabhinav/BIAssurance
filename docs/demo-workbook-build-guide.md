@@ -3,6 +3,11 @@
 **Who:** you, at Checkpoint A. **Tool:** Tableau Desktop Public Edition 2026.3. **Time:** about 45–60 minutes.
 **Data:** synthetic only (seed 42). Nothing in this guide publishes anything to Tableau Public.
 
+> **Shortcut now available.** A script-generated version of this exact workbook exists at
+> `fixtures/tableau/generated/` (`scripts/build_demo_workbook.py`). Opening it in Tableau and
+> saving a copy takes about 5 minutes; see `fixtures/tableau/FIXTURE.md`. This guide remains the
+> fallback if Tableau won't open the generated file, and the specification the generator follows.
+
 The workbench's parser will be developed and tested against the file you create here, so it is a
 genuinely Tableau-authored workbook. Follow names and formulas exactly; if Tableau shows a
 different name or behaves differently from what is written, **don't work around it — note it**
