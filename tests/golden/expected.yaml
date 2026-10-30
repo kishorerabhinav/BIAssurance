@@ -1,0 +1,34 @@
+# Hand-computed expected KPIs for tests/golden/legacy (worked out on paper, not by code).
+#
+# Rules applied: cancelled orders excluded (data source filter, before FIXED); worksheets filter
+# YEAR(OrdDt) = 2025 (dimension filter, after FIXED); DiscPct empty = 0 (ZN).
+#
+# FY2025 lines (status <> X, 2025 order date):
+#   O1-1  P1 qty2 x100 no disc      gross 200 disc  0 net 200 cost 120 gp  80  return R1 100
+#   O1-2  P2 qty1 x 50 10%          gross  50 disc  5 net  45 cost  30 gp  15
+#   O2-1  P1 qty1 x100 20%          gross 100 disc 20 net  80 cost  60 gp  20
+#   O3-1  P2 qty4 x 50 no disc      gross 200 disc  0 net 200 cost 120 gp  80  return R2 50
+#   O3-2  P1 qty1 x100 no disc      gross 100 disc  0 net 100 cost  60 gp  40
+#   O5-1  P2 qty2 x 50 50%          gross 100 disc 50 net  50 cost  60 gp -10
+# Excluded: O4 (cancelled), O6 (2024 order; its return R3 is excluded with it).
+# Cohorts (FIXED first non-cancelled order date, all years): C1 2024 (O6), C2 2025 (O3; the
+# cancelled 2024 order O4 must NOT count), C3 2025.
+total:
+  ALL: {net_revenue: 675, gross_profit: 225, gp_margin: 0.3333333333333333, discount_amount: 75,
+        orders: 4, aov: 168.75, returns_amount: 150, return_rate: 0.2222222222222222}
+region:
+  North:  {net_revenue: 325, gross_profit: 115, orders: 2, returns_amount: 100}
+  South:  {net_revenue: 300, gross_profit: 120, orders: 1, returns_amount: 50}
+  <NULL>: {net_revenue: 50, gross_profit: -10, orders: 1, returns_amount: 0}
+category:
+  Alpha: {net_revenue: 380, gross_profit: 140, orders: 3, discount_amount: 20, returns_amount: 100}
+  Beta:  {net_revenue: 295, gross_profit: 85, orders: 3, discount_amount: 55, returns_amount: 50}
+product:
+  P1: {net_revenue: 380, gross_profit: 140}
+  P2: {net_revenue: 295, gross_profit: 85}
+month:
+  2025-01: {net_revenue: 545, orders: 2, returns_amount: 150}
+  2025-02: {net_revenue: 130, orders: 2, returns_amount: 0}
+cohort_year:
+  "2024": {net_revenue: 325, orders: 2, gross_profit: 115}
+  "2025": {net_revenue: 350, orders: 2, gross_profit: 110}

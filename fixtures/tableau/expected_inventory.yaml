@@ -1,0 +1,39 @@
+# What the Phase 2 parser must find in the Tableau-authored fixture (from the build guide).
+# Names are as written in the guide; the build notes in FIXTURE.md record any deviations.
+workbook: sales_performance_legacy
+connection: {kind: text_file, folder_suffix: demo/data/seed_42/legacy_csv}
+physical_joins:
+  - {type: inner, left: ORDERS_HDR.csv, right: ord_lines.csv, on: [[OrdID, OrdID]]}
+relationships:
+  - {from: ORDERS_HDR/ord_lines, to: PROD_MSTR.csv, on: [[ProdCode, ProdCode]]}
+  - {from: PROD_MSTR.csv, to: prod_cat.csv, on: [[CatCd, CatCd]]}
+  - {from: ORDERS_HDR/ord_lines, to: CUSTMR.csv, on: [[CustNo, CustNo]]}
+  - {from: CUSTMR.csv, to: RGN_LKP.csv, on: [[Rgn_Cd, Rgn_Cd]]}
+  - {from: ORDERS_HDR/ord_lines, to: RTN_LOG.csv, on: [[OrdID, OrdID], [line_no, line_no]]}
+datasource_filters:
+  - {field: OrdStat, kind: categorical, exclude: [X]}
+parameters:
+  - {name: Top N, datatype: integer, current: 10, range: [5, 50, 5]}
+calculated_fields:
+  Line Gross: {expected_level: supported}
+  Discount Amount: {expected_level: supported}
+  Line Net: {expected_level: supported}
+  Line Cost: {expected_level: supported}
+  Gross Profit: {expected_level: supported}
+  Net Revenue: {expected_level: supported}
+  GP Margin %: {expected_level: supported}
+  Orders: {expected_level: supported}
+  AOV: {expected_level: supported}
+  Return Rate: {expected_level: supported}
+  Customer First Order: {expected_level: conditional, note: "FIXED: supported only with filter-order analysis (plan 6.4.1)"}
+  Cohort Year: {expected_level: conditional, note: depends on Customer First Order}
+  Running Net Revenue: {expected_level: unsupported, note: table calculation}
+worksheets:
+  KPI Summary: {filters: [year(OrdDt)=2025]}
+  Revenue by Region: {filters: [year(OrdDt)=2025]}
+  Monthly Trend: {filters: [year(OrdDt)=2025], table_calcs: [Running Net Revenue]}
+  Category Profitability: {filters: [year(OrdDt)=2025]}
+  Top Products: {filters: ["year(OrdDt)=2025 (context)", "top N ProdNm by Net Revenue"]}
+  Customer Cohorts: {filters: [year(OrdDt)=2025]}
+dashboards:
+  Sales Performance: [KPI Summary, Revenue by Region, Monthly Trend, Category Profitability]

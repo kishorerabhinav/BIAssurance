@@ -1,0 +1,160 @@
+# SEALED ANSWER KEY — planted migration defects in the synthetic demonstration environment.
+#
+# Written in Phase 1, before the validation engine exists. Its SHA-256 (LF-normalised) is recorded
+# in answer_key/SEALED.sha256 and verified by tests and the benchmark. Do not edit after sealing:
+# any change must be a new, documented revision with a new seal.
+#
+# The engine (src/biwb) must never read this directory (architecture test).
+#
+# Matching rule (pre-registered): a finding matches a defect when its (kpi, family, dimension)
+# is listed in that defect's signature. "*" means any value. Families:
+#   kpi_total, kpi_by_dimension, kpi_by_period, row_count, distinct_count, fanout,
+#   null_profile, date_boundary, filter_population, domain
+# Dimensions: region, category, product, cohort_year, month (for kpi_by_period), or a column name
+# for structural families.
+#
+# Result scope: these defects are designed by the same team that builds the detector. Detection
+# results on them are synthetic-benchmark evidence only (architecture plan §8.6.4).
+
+version: 2
+sealed_on: "2026-10-30"
+revisions:
+  - version: 2
+    date: "2026-10-30"
+    reason: >-
+      Phase 1 signature check (oracle, before any engine code existed) showed D1 also changes
+      returns_amount by cohort_year: a relabelled cancellation can become a customer's first
+      order, moving that customer (and their returns) to an earlier cohort. Added that rule to
+      D1. No other change.
+kpis: [net_revenue, gross_profit, gp_margin, discount_amount, orders, aov, return_rate, returns_amount]
+
+defects:
+  D1:
+    class: status_filter
+    title: Cancelled orders included in revenue
+    mechanism: >-
+      The target ETL maps orders that were cancelled after shipping to COMPLETED instead of
+      CANCELLED. The dashboard's "exclude cancelled" filter, correctly mapped to
+      order_status <> 'CANCELLED', no longer removes them.
+    expected_probe: status_filter
+    signature:
+      - {kpi: [net_revenue, gross_profit, discount_amount, orders, aov, gp_margin, return_rate],
+         family: [kpi_total, kpi_by_dimension, kpi_by_period], dimension: "*"}
+      - {kpi: "*", family: [filter_population, row_count, distinct_count], dimension: "*"}
+      - {kpi: [returns_amount], family: [kpi_by_dimension], dimension: [cohort_year]}
+
+  D2:
+    class: date_basis
+    title: Wrong date field mapped
+    mechanism: >-
+      fct_order_line.order_date_key is populated from the ship date instead of the order date.
+      Period totals shift towards later months and across the year boundary; the cohort
+      (FIXED first-order date) shifts with it.
+    expected_probe: date_basis
+    signature:
+      - {kpi: "*", family: [kpi_by_period, date_boundary], dimension: "*"}
+      - {kpi: "*", family: [kpi_total, kpi_by_dimension, filter_population, row_count, distinct_count],
+         dimension: "*"}
+
+  D3:
+    class: discount_formula
+    title: Discount calculation changed
+    mechanism: >-
+      Target discount_amount = unit_price * discount_pct (per unit; quantity omitted), and
+      net_amount = gross_amount - discount_amount. Discount is understated and net revenue
+      overstated on discounted lines with quantity > 1.
+    expected_probe: discount_formula
+    signature:
+      - {kpi: [net_revenue, gross_profit, gp_margin, discount_amount, aov, return_rate],
+         family: [kpi_total, kpi_by_dimension, kpi_by_period], dimension: "*"}
+
+  D4:
+    class: join_fanout
+    title: One-to-many join duplicates revenue
+    mechanism: >-
+      Order lines were joined to every promotion of their order, so lines of orders with two
+      promotions appear twice in fct_order_line (order_line_id no longer unique), breaking the
+      documented grain.
+    expected_probe: fanout
+    signature:
+      - {kpi: "*", family: [fanout, row_count], dimension: "*"}
+      - {kpi: [net_revenue, gross_profit, discount_amount, aov, returns_amount, return_rate, gp_margin],
+         family: [kpi_total, kpi_by_dimension, kpi_by_period], dimension: "*"}
+
+  D5:
+    class: null_handling
+    title: Unknown-region customers dropped
+    mechanism: >-
+      Customers without a region are removed by an inner join to dim_region, together with their
+      orders, lines and returns. The legacy dashboard showed them under a NULL region.
+    expected_probe: null_bucket
+    signature:
+      - {kpi: "*", family: [null_profile, row_count, distinct_count, domain], dimension: "*"}
+      - {kpi: "*", family: [kpi_total, kpi_by_dimension, kpi_by_period], dimension: "*"}
+
+  D6:
+    class: aggregation_grain
+    title: Product dimension at version grain
+    mechanism: >-
+      dim_product keeps historical price versions (two rows for products with a price change)
+      while facts join on product_code. Product- and category-level aggregates are duplicated
+      for those products; totals without product attributes are unaffected.
+    expected_probe: aggregation_grain
+    signature:
+      - {kpi: "*", family: [kpi_by_dimension], dimension: [product, category]}
+      - {kpi: "*", family: [fanout, distinct_count, row_count], dimension: "*"}
+
+  D7:
+    class: returns_component
+    title: Returns missing from the new model
+    mechanism: >-
+      fct_return stopped loading after a cutoff date; later returns are absent, so returned
+      amount and return rate are understated.
+    expected_probe: returns_component
+    signature:
+      - {kpi: [returns_amount, return_rate],
+         family: [kpi_total, kpi_by_dimension, kpi_by_period, date_boundary, row_count], dimension: "*"}
+
+  D8:
+    class: dimension_remap
+    title: Region mapping changed
+    mechanism: >-
+      In dim_customer some states are assigned to a different sales region. Revenue moves
+      between regions; every total is unchanged.
+    expected_probe: dimension_remap
+    signature:
+      - {kpi: "*", family: [kpi_by_dimension], dimension: [region]}
+      - {kpi: "*", family: [domain], dimension: [region]}
+
+scenarios:
+  S0:  {defects: [], expectation: no findings at Medium or above}
+  S1:  {defects: [D1]}
+  S2:  {defects: [D2]}
+  S3:  {defects: [D3]}
+  S4:  {defects: [D4]}
+  S5:  {defects: [D5]}
+  S6:  {defects: [D6]}
+  S7:  {defects: [D7]}
+  S8:  {defects: [D8], note: headline unchanged by construction}
+  S9:  {defects: [D1, D2, D3, D4, D5, D6, D7, D8]}
+  S10:
+    defects: [D1, D2, D5, D8]
+    note: >-
+      D1 is calibrated so FY2025 headline net revenue matches legacy within 0.05%;
+      the masked-discrepancy rule must fire for net_revenue.
+    expect_masked: [net_revenue]
+  H1:  {defects: [D1, D2, D3, D4, D5, D6, D7, D8], seed: 101, magnitudes: randomised}
+  H2:  {defects: [D1, D2, D3, D4, D5, D6, D7, D8], seed: 202, magnitudes: randomised}
+  H3:  {defects: [D1, D2, D3, D4, D5, D6, D7, D8], seed: 303, magnitudes: randomised}
+
+benign:
+  # A correct engine produces no findings at Medium or above for these, given the stated
+  # (legitimate) reviewer decisions.
+  B1: {change: "fct_order_line.net_amount -> line_net_amount; dim_region.region_name -> region_label",
+       reviewer_decision: approve renamed mappings}
+  B2: {change: "quantity and return_quantity INTEGER -> BIGINT", reviewer_decision: none}
+  B3: {change: fact rows shuffled, reviewer_decision: none}
+  B4: {change: "money columns of fct_order_line stored as DOUBLE with |noise| <= 0.004 INR per line",
+       reviewer_decision: none}
+  B5: {change: "order_status labels Complete / In Transit / Void / Awaiting",
+       reviewer_decision: "approve value mapping X->Void, C->Complete, S->In Transit, P->Awaiting"}

@@ -1,0 +1,7 @@
+# The UI is built in a later phase; these settings keep it local-only when it exists.
+[server]
+address = "127.0.0.1"
+headless = true
+
+[browser]
+gatherUsageStats = false

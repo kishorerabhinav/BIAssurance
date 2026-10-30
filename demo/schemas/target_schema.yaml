@@ -1,0 +1,100 @@
+# Target standardised model (as documented by the data platform team).
+# Consistent snake_case names, surrogate keys for dimensions, documented grain and definitions.
+name: target_standard
+dialect: duckdb
+tables:
+  dim_region:
+    description: Sales regions.
+    grain: [region_key]
+    columns:
+      region_key:  {type: INTEGER, key: true, nullable: false, description: Surrogate key}
+      region_code: {type: VARCHAR, nullable: false, description: Business region code}
+      region_name: {type: VARCHAR, nullable: false, description: Region display name}
+  dim_customer:
+    description: Customers. One row per customer.
+    grain: [customer_key]
+    columns:
+      customer_key:  {type: INTEGER, key: true, nullable: false, description: Surrogate key}
+      customer_id:   {type: VARCHAR, nullable: false, description: Business customer number}
+      customer_name: {type: VARCHAR, nullable: false, description: Customer name}
+      segment:       {type: VARCHAR, nullable: false, description: Customer segment}
+      state_code:    {type: VARCHAR, nullable: true, description: State code; NULL when unknown}
+      region_key:    {type: INTEGER, nullable: true, description: Sales region; NULL when state unknown}
+      signup_date:   {type: DATE, nullable: false, description: Account creation date}
+  dim_product:
+    description: Products with category. Documented grain is one row per product.
+    grain: [product_code]
+    columns:
+      product_key:   {type: INTEGER, key: true, nullable: false, description: Surrogate key}
+      product_code:  {type: VARCHAR, nullable: false, description: Business product code (join key used by facts)}
+      product_name:  {type: VARCHAR, nullable: false, description: Product name}
+      category_code: {type: VARCHAR, nullable: false, description: Category code}
+      category_name: {type: VARCHAR, nullable: false, description: Category name}
+      list_price:    {type: "DECIMAL(12,2)", nullable: false, description: List price}
+      standard_cost: {type: "DECIMAL(12,2)", nullable: false, description: Standard cost}
+      valid_from:    {type: DATE, nullable: false, description: Row validity start}
+      valid_to:      {type: DATE, nullable: false, description: Row validity end (9999-12-31 = open)}
+      is_current:    {type: BOOLEAN, nullable: false, description: Current row flag}
+  dim_date:
+    description: Calendar.
+    grain: [date_key]
+    columns:
+      date_key:      {type: INTEGER, key: true, nullable: false, description: yyyymmdd}
+      calendar_date: {type: DATE, nullable: false, description: Date}
+      year:          {type: INTEGER, nullable: false, description: Calendar year}
+      quarter:       {type: INTEGER, nullable: false, description: Calendar quarter}
+      month:         {type: INTEGER, nullable: false, description: Month number}
+      month_name:    {type: VARCHAR, nullable: false, description: Month name}
+      year_month:    {type: VARCHAR, nullable: false, description: YYYY-MM}
+  dim_promotion:
+    description: Promotions.
+    grain: [promotion_id]
+    columns:
+      promotion_id:   {type: VARCHAR, key: true, nullable: false, description: Promotion code}
+      promotion_name: {type: VARCHAR, nullable: false, description: Promotion name}
+  fct_order:
+    description: Orders. One row per order.
+    grain: [order_id]
+    columns:
+      order_id:       {type: VARCHAR, key: true, nullable: false, description: Order number}
+      customer_key:   {type: INTEGER, nullable: false, description: FK dim_customer}
+      order_date:     {type: DATE, nullable: false, description: Date the order was placed}
+      ship_date:      {type: DATE, nullable: true, description: Date shipped; NULL if not shipped}
+      order_status:   {type: VARCHAR, nullable: false, description: "COMPLETED, SHIPPED, CANCELLED or PENDING"}
+      order_date_key: {type: INTEGER, nullable: false, description: FK dim_date for order_date}
+  fct_order_line:
+    description: >-
+      Order lines. Documented grain: one row per order line. Amounts in INR.
+      net_amount = gross_amount - discount_amount; discount_amount = quantity * unit_price * discount_pct.
+    grain: [order_line_id]
+    columns:
+      order_line_id:   {type: VARCHAR, key: true, nullable: false, description: "order_id-line_number"}
+      order_id:        {type: VARCHAR, nullable: false, description: FK fct_order}
+      line_number:     {type: INTEGER, nullable: false, description: Line number within order}
+      customer_key:    {type: INTEGER, nullable: false, description: FK dim_customer}
+      product_code:    {type: VARCHAR, nullable: false, description: FK dim_product.product_code}
+      order_date_key:  {type: INTEGER, nullable: true, description: FK dim_date; the order date of the line}
+      promotion_id:    {type: VARCHAR, nullable: true, description: Primary promotion applied to the order}
+      quantity:        {type: INTEGER, nullable: false, description: Units}
+      unit_price:      {type: "DECIMAL(12,2)", nullable: false, description: Unit selling price}
+      discount_pct:    {type: "DECIMAL(4,2)", nullable: false, description: Discount fraction; 0 when none}
+      gross_amount:    {type: "DECIMAL(14,2)", nullable: false, description: quantity * unit_price}
+      discount_amount: {type: "DECIMAL(14,2)", nullable: false, description: Discount value}
+      net_amount:      {type: "DECIMAL(14,2)", nullable: false, description: Net sales amount}
+      unit_cost:       {type: "DECIMAL(12,2)", nullable: false, description: Unit cost at time of sale}
+      cost_amount:     {type: "DECIMAL(14,2)", nullable: false, description: quantity * unit_cost}
+  fct_return:
+    description: Returns. One row per return event.
+    grain: [return_id]
+    columns:
+      return_id:       {type: VARCHAR, key: true, nullable: false, description: Return id}
+      order_line_id:   {type: VARCHAR, nullable: false, description: FK fct_order_line}
+      return_date:     {type: DATE, nullable: false, description: Return date}
+      return_quantity: {type: INTEGER, nullable: false, description: Units returned}
+      return_amount:   {type: "DECIMAL(14,2)", nullable: false, description: Amount refunded}
+  bridge_order_promotion:
+    description: Promotions applied to orders. Grain order x promotion.
+    grain: [order_id, promotion_id]
+    columns:
+      order_id:     {type: VARCHAR, key: true, nullable: false, description: FK fct_order}
+      promotion_id: {type: VARCHAR, key: true, nullable: false, description: FK dim_promotion}

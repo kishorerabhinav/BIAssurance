@@ -1,0 +1,27 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# Secrets
+.env
+
+# Local runtime state
+workspace/
+
+# Generated synthetic data (reproducible from seed: python scripts/build_demo.py)
+demo/data/
+
+# Per-run defect magnitudes written by the generator (benchmark-only material)
+answer_key/generated/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

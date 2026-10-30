@@ -1,0 +1,75 @@
+# Legacy e-commerce reporting source (as documented by the legacy team).
+# Deliberately inconsistent: mixed naming conventions, codes instead of labels, stored derived values.
+name: legacy_ecommerce
+dialect: duckdb
+tables:
+  ORDERS_HDR:
+    description: Order header. One row per order.
+    grain: [OrdID]
+    columns:
+      OrdID:     {type: VARCHAR, key: true, nullable: false, description: Order number}
+      CustNo:    {type: VARCHAR, nullable: false, description: Customer number}
+      OrdDt:     {type: DATE, nullable: false, description: Date the order was placed}
+      ShipDt:    {type: DATE, nullable: true, description: Date the order left the warehouse; empty if not shipped}
+      OrdStat:   {type: VARCHAR, nullable: false, description: "Order status code: C=complete, S=shipped, X=cancelled, P=pending"}
+      OrdTotAmt: {type: "DECIMAL(14,2)", nullable: false, description: Stored order total (sum of line amounts)}
+  ord_lines:
+    description: Order lines. One row per order line.
+    grain: [OrdID, line_no]
+    columns:
+      OrdID:    {type: VARCHAR, key: true, nullable: false, description: Order number}
+      line_no:  {type: INTEGER, key: true, nullable: false, description: Line number within order}
+      ProdCode: {type: VARCHAR, nullable: false, description: Product code}
+      QTY:      {type: INTEGER, nullable: false, description: Units ordered}
+      UnitPx:   {type: "DECIMAL(12,2)", nullable: false, description: Unit selling price at time of order}
+      DiscPct:  {type: "DECIMAL(4,2)", nullable: true, description: Line discount as a fraction (0.15 = 15%); empty when no discount}
+      UnitCost: {type: "DECIMAL(12,2)", nullable: false, description: Unit cost at time of order}
+      LineAmt:  {type: "DECIMAL(14,2)", nullable: false, description: Stored net line amount = QTY*UnitPx*(1-DiscPct)}
+  PROD_MSTR:
+    description: Product master (current values only).
+    grain: [ProdCode]
+    columns:
+      ProdCode:  {type: VARCHAR, key: true, nullable: false, description: Product code}
+      ProdNm:    {type: VARCHAR, nullable: false, description: Product name}
+      CatCd:     {type: VARCHAR, nullable: false, description: Category code}
+      ListPx:    {type: "DECIMAL(12,2)", nullable: false, description: Current list price}
+      StdCost:   {type: "DECIMAL(12,2)", nullable: false, description: Current standard cost}
+      ActiveFlg: {type: VARCHAR, nullable: false, description: Y/N}
+  prod_cat:
+    description: Product categories.
+    grain: [CatCd]
+    columns:
+      CatCd: {type: VARCHAR, key: true, nullable: false, description: Category code}
+      CatNm: {type: VARCHAR, nullable: false, description: Category name}
+  CUSTMR:
+    description: Customers.
+    grain: [CustNo]
+    columns:
+      CustNo:   {type: VARCHAR, key: true, nullable: false, description: Customer number}
+      CustNm:   {type: VARCHAR, nullable: false, description: Customer name}
+      Seg:      {type: VARCHAR, nullable: false, description: Customer segment}
+      StCd:     {type: VARCHAR, nullable: true, description: State code; empty when unknown}
+      Rgn_Cd:   {type: VARCHAR, nullable: true, description: Sales region code derived from state; empty when unknown}
+      SignupDt: {type: DATE, nullable: false, description: Account creation date}
+  RGN_LKP:
+    description: Region lookup.
+    grain: [Rgn_Cd]
+    columns:
+      Rgn_Cd: {type: VARCHAR, key: true, nullable: false, description: Region code}
+      Rgn_Nm: {type: VARCHAR, nullable: false, description: Region name}
+  RTN_LOG:
+    description: Returns log. One row per return event on an order line.
+    grain: [RtnID]
+    columns:
+      RtnID:   {type: VARCHAR, key: true, nullable: false, description: Return id}
+      OrdID:   {type: VARCHAR, nullable: false, description: Order number}
+      line_no: {type: INTEGER, nullable: false, description: Line number}
+      RtnDt:   {type: DATE, nullable: false, description: Return date}
+      RtnQty:  {type: INTEGER, nullable: false, description: Units returned}
+      RtnAmt:  {type: "DECIMAL(14,2)", nullable: false, description: Amount refunded}
+  PROMO_XREF:
+    description: Promotions applied to orders (an order can have several).
+    grain: [OrdID, PromoCd]
+    columns:
+      OrdID:   {type: VARCHAR, key: true, nullable: false, description: Order number}
+      PromoCd: {type: VARCHAR, key: true, nullable: false, description: Promotion code}

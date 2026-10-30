@@ -1,0 +1,3 @@
+ProdCode,ProdNm,CatCd,ListPx,StdCost,ActiveFlg
+P1,Widget,A,100.00,60.00,Y
+P2,Gadget,B,50.00,30.00,Y
